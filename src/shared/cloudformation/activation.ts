@@ -13,6 +13,7 @@ import { NoopWatcher } from '../fs/watchedFiles'
 import { createStarterTemplateFile } from './cloudformation'
 import { Commands } from '../vscode/commands2'
 import globals from '../extensionGlobals'
+import { timed } from '../profiling'
 
 export const templateFileGlobPattern = '**/*.{yaml,yml}'
 
@@ -73,7 +74,7 @@ function setTemplateRegistryInGlobals(registry: CloudFormationTemplateRegistry) 
         await registry.watchUntitledFiles()
     }
 
-    const asyncRegistry = new AsyncCloudFormationTemplateRegistry(registry, registrySetupFunc)
+    const asyncRegistry = timed('AsyncCloudFormationTemplateRegistry', () => new AsyncCloudFormationTemplateRegistry(registry, registrySetupFunc))
 
     Object.defineProperty(globals, 'templateRegistry', {
         set(newInstance: CloudFormationTemplateRegistry) {

@@ -40,6 +40,7 @@ import { shared } from '../utilities/functionUtils'
 import { migrateLegacySettings, SamCliSettings } from './cli/samCliSettings'
 import { Commands } from '../vscode/commands2'
 import { registerSync } from './sync'
+import { timed } from '../profiling'
 
 const sharedDetectSamCli = shared(detectSamCli)
 
@@ -47,15 +48,22 @@ const sharedDetectSamCli = shared(detectSamCli)
  * Activate SAM-related functionality.
  */
 export async function activate(ctx: ExtContext): Promise<void> {
-    await createYamlExtensionPrompt()
-    await migrateLegacySettings()
-    const config = SamCliSettings.instance
+    await timed('createYamlExtensionPrompt', createYamlExtensionPrompt)
+    await timed('migrateLegacySettings', migrateLegacySettings)
+    const config = timed('SamCliSettings.instance', () => SamCliSettings.instance)
 
     ctx.extensionContext.subscriptions.push(
-        ...(await activateCodeLensProviders(ctx, config, ctx.outputChannel, ctx.telemetryService))
+        ...(await timed(
+            'activateCodeLensProviders',
+            activateCodeLensProviders,
+            ctx,
+            config,
+            ctx.outputChannel,
+            ctx.telemetryService
+        ))
     )
 
-    await registerServerlessCommands(ctx, config)
+    await timed('registerServerlessCommands', registerServerlessCommands, ctx, config)
 
     ctx.extensionContext.subscriptions.push(
         vscode.debug.registerDebugConfigurationProvider(AWS_SAM_DEBUG_TYPE, new SamDebugConfigProvider(ctx))
@@ -86,7 +94,7 @@ export async function activate(ctx: ExtContext): Promise<void> {
         await resumeCreateNewSamApp(ctx)
     }
 
-    registerSync()
+    timed('registerSync', registerSync)
 }
 
 async function registerServerlessCommands(ctx: ExtContext, settings: SamCliSettings): Promise<void> {
@@ -130,7 +138,7 @@ async function registerServerlessCommands(ctx: ExtContext, settings: SamCliSetti
 
 async function activateCodeLensRegistry(context: ExtContext) {
     try {
-        const registry = new CodelensRootRegistry()
+        const registry = timed('CodelensRootRegistry', () => new CodelensRootRegistry())
         globals.codelensRootRegistry = registry
 
         //
@@ -174,7 +182,7 @@ async function activateCodeLensProviders(
 
     // Ideally we should not need to `await` this Promise, but CodeLens providers are currently not implementing
     // the event to notify on when their results change.
-    await activateCodeLensRegistry(context)
+    await timed('activateCodeLensRegistry', activateCodeLensRegistry, context)
 
     const supportedLanguages: {
         [language: string]: codelensUtils.OverridableCodeLensProvider

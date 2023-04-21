@@ -67,20 +67,22 @@ import { Logging } from './shared/logger/commands'
 import { UriHandler } from './shared/vscode/uriHandler'
 import { telemetry } from './shared/telemetry/telemetry'
 import { Auth } from './credentials/auth'
+import { timed } from './shared/profiling'
+import * as profiling from './shared/profiling'
 
 let localize: nls.LocalizeFunc
 
 export async function activate(context: vscode.ExtensionContext) {
-    await initializeComputeRegion()
     const activationStartedOn = Date.now()
+    await timed('initializeComputeRegion', initializeComputeRegion)
     localize = nls.loadMessageBundle()
     initialize(context)
-    initializeManifestPaths(context)
+    timed('manifestpaths', initializeManifestPaths, context)
 
     const toolkitOutputChannel = vscode.window.createOutputChannel(
         localize('AWS.channel.aws.toolkit', '{0} Toolkit', getIdeProperties().company)
     )
-    await activateLogger(context, toolkitOutputChannel)
+    await timed('logger', activateLogger, context, toolkitOutputChannel)
     const remoteInvokeOutputChannel = vscode.window.createOutputChannel(
         localize('AWS.channel.aws.remoteInvoke', '{0} Remote Invocations', getIdeProperties().company)
     )
@@ -96,7 +98,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }
 
     try {
-        initializeCredentialsProviderManager()
+        timed('credentials-manager', initializeCredentialsProviderManager)
 
         const endpointsProvider = makeEndpointsProvider()
 
@@ -113,7 +115,7 @@ export async function activate(context: vscode.ExtensionContext) {
             .filter(x => x)
             .forEach(line => getLogger().info(line))
 
-        await initializeAwsCredentialsStatusBarItem(awsContext, context)
+        await timed('statusbar', initializeAwsCredentialsStatusBarItem, awsContext, context)
         globals.regionProvider = regionProvider
         globals.loginManager = loginManager
         globals.awsContextCommands = new AwsContextCommands(regionProvider, Auth.instance)
@@ -124,8 +126,8 @@ export async function activate(context: vscode.ExtensionContext) {
         const settings = Settings.instance
         const experiments = Experiments.instance
 
-        await initializeCredentials(context, awsContext, loginManager)
-        await activateTelemetry(context, awsContext, settings)
+        await timed('credentials-init', initializeCredentials, context, awsContext, loginManager)
+        await timed('telemetry', activateTelemetry, context, awsContext, settings)
 
         experiments.onDidChange(({ key }) => {
             telemetry.aws_experimentActivation.run(span => {
@@ -135,8 +137,8 @@ export async function activate(context: vscode.ExtensionContext) {
             })
         })
 
-        await globals.schemaService.start()
-        awsFiletypes.activate()
+        await timed('schemaService.start()', async () => await globals.schemaService.start())
+        timed('aws-filetypes', awsFiletypes.activate)
 
         globals.uriHandler = new UriHandler()
         context.subscriptions.push(vscode.window.registerUriHandler(globals.uriHandler))
@@ -154,7 +156,7 @@ export async function activate(context: vscode.ExtensionContext) {
         }
 
         try {
-            activateDev(extContext)
+            timed('devtools', activateDev, extContext)
         } catch (error) {
             getLogger().debug(`Developer Tools (internal): failed to activate: ${(error as Error).message}`)
         }
@@ -191,54 +193,53 @@ export async function activate(context: vscode.ExtensionContext) {
             })
         )
 
-        await codecatalyst.activate(extContext)
+        await timed('codecatalyst', codecatalyst.activate, extContext)
 
-        await activateCloudFormationTemplateRegistry(context)
+        await timed('cloudformation-templateregistry', activateCloudFormationTemplateRegistry, context)
 
-        await activateCodeWhisperer(extContext)
+        await timed('codewhisperer', activateCodeWhisperer, extContext)
 
-        await activateAwsExplorer({
+        await timed('awsexplorer', activateAwsExplorer, {
             context: extContext,
             regionProvider,
             toolkitOutputChannel,
             remoteInvokeOutputChannel,
         })
 
-        await activateAppRunner(extContext)
-
-        await activateApiGateway({
+        await timed('apprunner', activateAppRunner, extContext)
+        await timed('apigateway', activateApiGateway, {
             extContext: extContext,
             outputChannel: remoteInvokeOutputChannel,
         })
+        await timed('lambda', activateLambda, extContext)
+        await timed(
+            'ssmdocuments',
+            activateSsmDocument,
+            context,
+            globals.awsContext,
+            regionProvider,
+            toolkitOutputChannel
+        )
+        await timed('sam', activateSam, extContext)
+        await timed('s3', activateS3, extContext)
+        await timed('ecr', activateEcr, context)
+        await timed('cloudwatchlogs', activateCloudWatchLogs, context, settings)
+        await timed('dynamicresources', activateDynamicResources, context)
+        await timed('iot', activateIot, extContext)
+        await timed('ecs', activateEcs, extContext)
+        await timed('eventbridge-schemas', activateSchemas, extContext)
+        await timed('stepfunctions', activateStepFunctions, context, awsContext, toolkitOutputChannel)
 
-        await activateLambda(extContext)
-
-        await activateSsmDocument(context, globals.awsContext, regionProvider, toolkitOutputChannel)
-
-        await activateSam(extContext)
-
-        await activateS3(extContext)
-
-        await activateEcr(context)
-
-        await activateCloudWatchLogs(context, settings)
-
-        await activateDynamicResources(context)
-
-        await activateIot(extContext)
-
-        await activateEcs(extContext)
-
-        await activateSchemas(extContext)
-
-        await activateStepFunctions(context, awsContext, toolkitOutputChannel)
-
-        showWelcomeMessage(context)
+        timed('showWelcomeMessage', showWelcomeMessage, context)
 
         recordToolkitInitialization(activationStartedOn, getLogger())
 
         if (!isReleaseVersion()) {
             globals.telemetry.assertPassiveTelemetry(globals.didReload)
+        }
+
+        if (getLogger().logLevelEnabled('verbose')) {
+            profiling.report()
         }
     } catch (error) {
         const stacktrace = (error as Error).stack?.split('\n')
