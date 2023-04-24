@@ -137,7 +137,7 @@ export async function activate(context: vscode.ExtensionContext) {
             })
         })
 
-        await timed('schemaService.start()', async () => await globals.schemaService.start())
+        await globals.schemaService.start()
         timed('aws-filetypes', awsFiletypes.activate)
 
         globals.uriHandler = new UriHandler()
