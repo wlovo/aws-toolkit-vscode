@@ -17,6 +17,7 @@ import globals from '../extensionGlobals'
 import { isUntitledScheme, normalizeVSCodeUri } from '../utilities/vsCodeUtils'
 import { sleep } from '../utilities/timeoutUtils'
 import { localize } from '../utilities/vsCodeUtils'
+import { timed } from '../profiling'
 
 export class CloudFormationTemplateRegistry extends WatchedFiles<CloudFormation.Template> {
     protected name: string = 'CloudFormationTemplateRegistry'
@@ -91,10 +92,11 @@ export class AsyncCloudFormationTemplateRegistry {
         asyncSetupFunc: (instance: CloudFormationTemplateRegistry) => Promise<void>
     ) {
         getLogger().info('cfn: starting template registry setup.')
-        asyncSetupFunc(instance).then(() => {
+        timed('asyncSetupFunc', async () => {
+            await asyncSetupFunc(instance).then(async () => {
             this.isSetup = true
             getLogger().info('cfn: template registry setup successful.')
-        })
+        })})
     }
 
     /**
