@@ -72,6 +72,7 @@ export class CredentialsInjector implements vscode.TerminalProfileProvider {
     public dispose(): void {
         vscode.Disposable.from(...this.#disposables).dispose()
         this.collection.clear()
+        clearTimeout(this.#expirationTimer)
     }
 
     private async handleUpdate(conn: Connection | undefined = this.auth.activeConnection) {
