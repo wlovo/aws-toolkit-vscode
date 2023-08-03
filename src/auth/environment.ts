@@ -42,7 +42,13 @@ export class CredentialsInjector implements vscode.TerminalProfileProvider {
             ? this.auth.activeConnection
             : await promptForConnection(this.auth, 'iam')
 
-        if (!conn || !isIamConnection(conn)) {
+        // User selected to edit credentials or add a new connection
+        // We're not within a command, otherwise we'd throw an error here to signal cancellation
+        if (!conn) {
+            return
+        }
+
+        if (!isIamConnection(conn)) {
             throw new ToolkitError('No valid AWS IAM connection found.', { code: 'NoConnection' })
         }
 
