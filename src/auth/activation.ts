@@ -13,6 +13,8 @@ import { AuthCommandBackend, AuthCommandDeclarations } from './commands'
 import { getLogger } from '../shared/logger'
 import { isInDevEnv } from '../codecatalyst/utils'
 import { ExtensionUse } from './utils'
+import { CredentialsInjector } from './environment'
+import { isCloud9 } from '../shared/extensionUtilities'
 
 export async function initialize(
     extensionContext: vscode.ExtensionContext,
@@ -35,6 +37,12 @@ export async function initialize(
     )
 
     showManageConnectionsOnStartup()
+
+    if (!isCloud9()) {
+        const injector = new CredentialsInjector(extensionContext.environmentVariableCollection)
+
+        extensionContext.subscriptions.push(injector, vscode.window.registerTerminalProfileProvider('aws', injector))
+    }
 }
 
 /**
