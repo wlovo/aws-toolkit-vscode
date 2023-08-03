@@ -7,12 +7,13 @@ import * as vscode from 'vscode'
 import { CredentialsSettings } from './credentials/utils'
 import { telemetry } from '../shared/telemetry/telemetry'
 import { Auth } from './auth'
-import { IamConnection, isIamConnection } from './connection'
+import { Connection, IamConnection, isIamConnection } from './connection'
 import { ToolkitError } from '../shared/errors'
 import { promptForConnection } from './utils'
 
 export class CredentialsInjector implements vscode.TerminalProfileProvider {
     readonly #disposables = [] as vscode.Disposable[]
+    #expirationTimer?: number
 
     public constructor(
         private readonly collection: vscode.EnvironmentVariableCollection,
@@ -57,10 +58,12 @@ export class CredentialsInjector implements vscode.TerminalProfileProvider {
                 ? ((await this.auth.reauthenticate(conn)) as unknown as IamConnection)
                 : conn
 
+        const { env } = await injectCredentials(this.auth, validatedConn, 'TerminalProfile')
+
         return new vscode.TerminalProfile({
+            env,
             strictEnv: true,
             name: `AWS (${validatedConn.label})`,
-            env: await injectCredentials(this.auth, validatedConn, 'TerminalProfile'),
             message: `Using AWS connection "${validatedConn.label}"`,
             isTransient: true,
         } as vscode.TerminalOptions)
@@ -71,21 +74,27 @@ export class CredentialsInjector implements vscode.TerminalProfileProvider {
         this.collection.clear()
     }
 
-    private async handleUpdate(conn = this.auth.activeConnection) {
+    private async handleUpdate(conn: Connection | undefined = this.auth.activeConnection) {
         // This will not work well with multiple users of `EnvironmentVariableCollection`
         this.collection.clear()
+        clearTimeout(this.#expirationTimer)
+
         if (!this.enabled) {
             return
         }
 
-        if (conn?.state === 'valid' && isIamConnection(conn)) {
+        if (conn && this.auth.getConnectionState(conn) === 'valid' && isIamConnection(conn)) {
             await this.updateCollection(conn)
         }
     }
 
     private async updateCollection(conn: IamConnection): Promise<void> {
-        const variables = await injectCredentials(this.auth, conn, 'AutomaticInjection', {})
-        for (const [k, v] of Object.entries(variables)) {
+        const { expiration, env } = await injectCredentials(this.auth, conn, 'AutomaticInjection', {})
+        if (expiration) {
+            this.#expirationTimer = +setTimeout(() => this.handleUpdate(conn), expiration.getTime() - Date.now())
+        }
+
+        for (const [k, v] of Object.entries(env)) {
             if (v !== undefined) {
                 this.collection.replace(k, v)
             } else {
@@ -107,11 +116,14 @@ export async function injectCredentials(
         const credentials = await connection.getCredentials()
 
         return {
-            ...env,
-            AWS_REGION: await auth.getDefaultRegion(connection),
-            AWS_ACCESS_KEY_ID: credentials.accessKeyId,
-            AWS_SECRET_ACCESS_KEY: credentials.secretAccessKey,
-            AWS_SESSION_TOKEN: credentials.sessionToken,
+            env: {
+                ...env,
+                AWS_REGION: await auth.getDefaultRegion(connection),
+                AWS_ACCESS_KEY_ID: credentials.accessKeyId,
+                AWS_SECRET_ACCESS_KEY: credentials.secretAccessKey,
+                AWS_SESSION_TOKEN: credentials.sessionToken,
+            },
+            expiration: credentials.expiration,
         }
     })
 }
